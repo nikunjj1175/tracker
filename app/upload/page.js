@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import axios from 'axios';
 import '../globals.css';
 
 export default function UploadPage() {
@@ -155,17 +156,19 @@ export default function UploadPage() {
       uploadFormData.append('tradeDate', tradeDate);
       uploadFormData.append('extractOnly', 'true'); // Flag to only extract, not save yet
 
-      const response = await fetch('/api/upload-trade', {
-        method: 'POST',
+      const response = await axios.post('/api/upload-trade', uploadFormData, {
         headers: {
           Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
         },
-        body: uploadFormData,
+        timeout: 120000, // 120 seconds timeout (OCR can take time)
       });
 
-      const data = await response.json();
+      const data = response.data;
+      console.log(data);
+      
 
-      if (!response.ok || !data.success) {
+      if (!data.success) {
         // Handle error response
         const errorMsg = data.message || 'Upload failed. Please try again.';
         setMessage(errorMsg);
@@ -181,17 +184,17 @@ export default function UploadPage() {
         setProcessingMessage('Extracting data from image...');
 
         // If extracted data is available, use it
-        if (data.extractedData) {
+        if (data.extractedData && data.extractedData.symbol) {
           setExtractedData(data.extractedData);
           setFormData({
             symbol: data.extractedData.symbol || '',
             type: data.extractedData.type || 'Buy',
-            volumeLot: data.extractedData.volumeLot || '',
-            openPrice: data.extractedData.openPrice || '',
-            closePrice: data.extractedData.closePrice || '',
-            takeProfit: data.extractedData.takeProfit || '',
-            stopLoss: data.extractedData.stopLoss || '',
-            profitLoss: data.extractedData.profitLoss || '',
+            volumeLot: data.extractedData.volumeLot?.toString() || '',
+            openPrice: data.extractedData.openPrice?.toString() || '',
+            closePrice: data.extractedData.closePrice?.toString() || '',
+            takeProfit: data.extractedData.takeProfit?.toString() || '',
+            stopLoss: data.extractedData.stopLoss?.toString() || '',
+            profitLoss: data.extractedData.profitLoss?.toString() || '',
             openTime: data.extractedData.openTime || '',
             closeTime: data.extractedData.closeTime || '',
           });
@@ -213,8 +216,22 @@ export default function UploadPage() {
       console.error('Upload error:', error);
       let errorMsg = 'Network error. Please check your internet connection and try again.';
       
-      if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
-        errorMsg = 'Request timeout. The image might be too large or network is slow. Please try with a smaller image (max 10MB).';
+      // Handle axios errors
+      if (axios.isAxiosError(error)) {
+        if (error.response) {
+          // Server responded with error status
+          const responseData = error.response.data;
+          errorMsg = responseData?.message || error.response.statusText || 'Upload failed. Please try again.';
+        } else if (error.request) {
+          // Request made but no response
+          errorMsg = 'No response from server. Please check your internet connection and try again.';
+        } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          errorMsg = 'Request timeout. The image might be too large or network is slow. Please try with a smaller image (max 5MB).';
+        } else {
+          errorMsg = error.message || 'Upload failed. Please try again.';
+        }
+      } else if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
+        errorMsg = 'Request timeout. The image might be too large or network is slow. Please try with a smaller image (max 5MB).';
       } else if (error.message) {
         errorMsg = error.message;
       }
@@ -258,17 +275,17 @@ export default function UploadPage() {
         tradeDate: tradeDate,
       }));
 
-      const response = await fetch('/api/upload-trade', {
-        method: 'POST',
+      const response = await axios.post('/api/upload-trade', submitFormData, {
         headers: {
           Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
         },
-        body: submitFormData,
+        timeout: 120000, // 120 seconds timeout (OCR can take time)
       });
 
-      const data = await response.json();
+      const data = response.data;
 
-      if (!response.ok || !data.success) {
+      if (!data.success) {
         const errorMsg = data.message || 'Failed to save trade. Please try again.';
         setMessage(errorMsg);
         setMessageType('error');
@@ -292,7 +309,21 @@ export default function UploadPage() {
       console.error('Save trade error:', error);
       let errorMsg = 'Network error. Please check your internet connection and try again.';
       
-      if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
+      // Handle axios errors
+      if (axios.isAxiosError(error)) {
+        if (error.response) {
+          // Server responded with error status
+          const responseData = error.response.data;
+          errorMsg = responseData?.message || error.response.statusText || 'Failed to save trade. Please try again.';
+        } else if (error.request) {
+          // Request made but no response
+          errorMsg = 'No response from server. Please check your internet connection and try again.';
+        } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          errorMsg = 'Request timeout. Please try again.';
+        } else {
+          errorMsg = error.message || 'Failed to save trade. Please try again.';
+        }
+      } else if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
         errorMsg = 'Request timeout. Please try again.';
       } else if (error.message) {
         errorMsg = error.message;

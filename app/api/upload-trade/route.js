@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { uploadToCloudinary } from '@/lib/cloudinary';
-import { extractTradeDataFromImage } from '@/utils/ocrParser';
+const { uploadToCloudinary } = require('@/lib/cloudinary');
+const { extractTradeDataFromImage } = require('@/utils/ocrParser');
 import connectDB from '@/lib/mongodb';
 import Trade from '@/models/Trade';
 
@@ -62,39 +62,55 @@ export async function POST(request) {
       );
     }
 
-    // Upload to Cloudinary with error handling and promise rejection handling
+    // Upload to Cloudinary (same pattern as mandal project)
+    console.log('[DEBUG] Starting Cloudinary upload...');
+    console.log('[DEBUG] File size:', file.size, 'bytes');
+    console.log('[DEBUG] File type:', file.type);
+    console.log('[DEBUG] File name:', file.name);
+    
     let url, publicId;
     try {
-      // Wrap in Promise to handle any unhandled rejections
-      const uploadResult = await Promise.resolve(uploadToCloudinary(
+      const date = new Date(tradeDate);
+      const year = date.getFullYear();
+      const month = date.toLocaleString('default', { month: 'long' });
+      const day = date.toLocaleDateString('en-GB').replace(/\//g, '-');
+      const folderPath = `crypto-trades/${year}/${month}/${day}`;
+      const timestamp = Date.now();
+      const extension = file.name.split('.').pop() || 'jpg';
+      const baseName = file.name.split('.')[0] || 'trade';
+      const filename = `${baseName}_${timestamp}`;
+      
+      console.log('[DEBUG] Upload folder:', folderPath);
+      console.log('[DEBUG] Upload filename:', filename);
+      
+      // Upload using mandal project pattern
+      const uploadResult = await uploadToCloudinary(
         buffer,
-        file.name,
-        new Date(tradeDate)
-      )).catch((error) => {
-        // Catch any unhandled rejections
-        console.error('Cloudinary upload promise rejection:', error);
-        throw error;
+        folderPath,
+        filename
+      );
+      
+      console.log('[DEBUG] Cloudinary upload successful!');
+      console.log('[DEBUG] Upload result:', {
+        url: uploadResult.url || uploadResult.secure_url,
+        publicId: uploadResult.publicId || uploadResult.public_id
       });
       
-      url = uploadResult.url;
-      publicId = uploadResult.publicId;
+      url = uploadResult.url || uploadResult.secure_url;
+      publicId = uploadResult.publicId || uploadResult.public_id;
     } catch (error) {
-      console.error('Cloudinary upload error:', error);
-      
-      // Provide user-friendly error message
-      let errorMessage = 'Failed to upload image to cloud storage. ';
-      if (error.message) {
-        errorMessage = error.message;
-      } else if (error.name === 'TimeoutError' || error.http_code === 499) {
-        errorMessage = 'Upload timeout: The image upload took too long. Please try with a smaller image (max 5MB recommended) or check your internet connection.';
-      } else {
-        errorMessage += 'Please check your internet connection and try again.';
-      }
+      console.error('[DEBUG] Cloudinary upload error:', error);
+      console.error('[DEBUG] Error details:', {
+        message: error.message,
+        name: error.name,
+        http_code: error.http_code,
+        stack: error.stack
+      });
       
       return NextResponse.json(
         { 
           success: false, 
-          message: errorMessage
+          message: `Failed to upload image: ${error.message || 'Unknown error'}`
         },
         { status: 500 }
       );
@@ -102,46 +118,50 @@ export async function POST(request) {
 
     // If extractOnly flag is set, just return the image URL and extracted data
     if (extractOnly) {
-      // Try OCR extraction (with timeout handling)
-      let ocrResult;
+      console.log('[DEBUG] extractOnly=true, performing OCR extraction...');
+      console.log('[DEBUG] Image URL:', url);
+      console.log('[DEBUG] Using image buffer directly (no need to fetch from URL)');
+      
+      // Perform OCR with timeout (30 seconds for OCR processing)
+      let ocrResult = null;
+      
       try {
-        // Set a timeout for OCR processing (30 seconds)
+        console.log('[DEBUG] Calling extractTradeDataFromImage with buffer...');
+        // Pass the buffer directly instead of URL to avoid fetch timeout
+        // Set timeout to 30 seconds for OCR processing (OCR can take time)
         ocrResult = await Promise.race([
           extractTradeDataFromImage(buffer),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OCR processing timeout')), 30000)
+            setTimeout(() => reject(new Error('OCR timeout')), 30000)
           )
         ]);
-      } catch (error) {
-        console.error('OCR extraction error:', error);
-        // If OCR fails or times out, still return image URL for manual entry
-        return NextResponse.json({
-          success: true,
-          imageUrl: url,
-          publicId: publicId,
-          extractedData: null,
-          message: 'Image uploaded successfully. OCR extraction failed or timed out. Please enter data manually.',
-        });
+        
+        console.log('[DEBUG] OCR Result received:', ocrResult);
+        
+        if (ocrResult && ocrResult.success && ocrResult.data) {
+          console.log('[DEBUG] OCR Status: SUCCESS');
+          return NextResponse.json({
+            success: true,
+            imageUrl: url,
+            publicId: publicId,
+            extractedData: ocrResult.data,
+            message: 'Image uploaded and data extracted successfully',
+          });
+        }
+      } catch (ocrError) {
+        console.error('[DEBUG] OCR error (continuing without OCR):', ocrError.message);
+        // Continue without OCR - user can enter data manually
       }
       
-      if (ocrResult && ocrResult.success && ocrResult.data) {
-        return NextResponse.json({
-          success: true,
-          imageUrl: url,
-          publicId: publicId,
-          extractedData: ocrResult.data,
-          message: 'Image uploaded and data extracted successfully',
-        });
-      } else {
-        // If OCR fails, still return image URL for manual entry
-        return NextResponse.json({
-          success: true,
-          imageUrl: url,
-          publicId: publicId,
-          extractedData: null,
-          message: 'Image uploaded. OCR extraction failed. Please enter data manually.',
-        });
-      }
+      // Return success with image URL (OCR failed, but upload succeeded)
+      console.log('[DEBUG] Returning without OCR data - user can enter manually');
+      return NextResponse.json({
+        success: true,
+        imageUrl: url,
+        publicId: publicId,
+        extractedData: null,
+        message: 'Image uploaded successfully. Please enter trade data manually.',
+      });
     }
 
     let tradeData;
@@ -156,43 +176,14 @@ export async function POST(request) {
         cloudinaryPublicId: publicId,
       };
     } else {
-      // Try OCR extraction with timeout handling
-      let ocrResult;
-      try {
-        // Set a timeout for OCR processing (30 seconds)
-        ocrResult = await Promise.race([
-          extractTradeDataFromImage(buffer),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OCR processing timeout')), 30000)
-          )
-        ]);
-      } catch (error) {
-        console.error('OCR extraction error:', error);
-        // If OCR fails or times out, return with image URL for manual entry
-        return NextResponse.json({
-          success: false,
-          message: 'OCR extraction failed or timed out. Please enter data manually.',
-          imageUrl: url,
-          publicId: publicId,
-        });
-      }
-      
-      if (ocrResult && ocrResult.success) {
-        tradeData = {
-          ...ocrResult.data,
-          tradeDate: ocrResult.data.tradeDate || new Date(tradeDate),
-          screenshotUrl: url,
-          cloudinaryPublicId: publicId,
-        };
-      } else {
-        // If OCR fails, return with image URL for manual entry
-        return NextResponse.json({
-          success: false,
-          message: 'OCR extraction failed. Please enter data manually.',
-          imageUrl: url,
-          publicId: publicId,
-        });
-      }
+      // If no manual data, require manual entry (OCR disabled due to worker issues)
+      console.log('[DEBUG] No manual data provided');
+      return NextResponse.json({
+        success: false,
+        message: 'Please provide trade data. OCR is currently unavailable.',
+        imageUrl: url,
+        publicId: publicId,
+      });
     }
 
     // Validate required fields
