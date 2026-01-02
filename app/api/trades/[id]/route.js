@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAuth, requireAdmin } from '@/lib/auth';
 import connectDB from '@/lib/mongodb';
 import Trade from '@/models/Trade';
-import { deleteFromCloudinary } from '@/lib/cloudinary';
+const { deleteFromCloudinary } = require('@/lib/cloudinary');
 
 // GET single trade
 export async function GET(request, { params }) {

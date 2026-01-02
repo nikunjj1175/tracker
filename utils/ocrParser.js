@@ -1,31 +1,94 @@
-import Tesseract from 'tesseract.js';
+const { createWorker } = require('tesseract.js');
+const axios = require('axios');
+
+let workerPromise = null;
+let recognitionQueue = Promise.resolve();
+
+async function getWorker() {
+  if (!workerPromise) {
+    // Configure worker for Node.js environment
+    console.log('[DEBUG OCR] Creating Tesseract worker...');
+    workerPromise = createWorker('eng', {
+      logger: (m) => {
+        // Only log important messages to avoid spam
+        if (m.status === 'recognizing text') {
+          console.log(`[OCR] Progress: ${Math.round(m.progress * 100)}%`);
+        }
+      },
+    });
+    // Initialize the worker
+    await workerPromise;
+    console.log('[DEBUG OCR] Worker created and initialized');
+  } else {
+    // Ensure worker is initialized
+    await workerPromise;
+  }
+  return workerPromise;
+}
+
+function queueRecognition(task) {
+  const job = recognitionQueue.then(() => task(), () => task());
+  recognitionQueue = job.catch(() => {});
+  return job;
+}
 
 /**
  * Extract trading data from screenshot using OCR
- * This is a basic implementation - you may need to customize based on your trading platform
- * @param {Buffer} imageBuffer - Image buffer
+ * Uses singleton worker pattern with queue (same as mandal project)
+ * @param {string|Buffer} imageInput - Image URL (Cloudinary URL or data URL) or Buffer
  * @returns {Promise<object>} Extracted trade data
  */
-export async function extractTradeDataFromImage(imageBuffer) {
+async function extractTradeDataFromImage(imageInput) {
   try {
-    // Perform OCR on the image
-    const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng', {
-      logger: (m) => console.log(m), // Optional: log OCR progress
+    let imageBuffer;
+    
+    // Check if input is a Buffer or URL string
+    if (Buffer.isBuffer(imageInput)) {
+      console.log('[DEBUG OCR] Using provided image buffer, size:', imageInput.length, 'bytes');
+      imageBuffer = imageInput;
+    } else {
+      // Fetch the image from URL
+      console.log('[DEBUG OCR] Starting OCR extraction for URL:', imageInput);
+      console.log('[DEBUG OCR] Fetching image from URL...');
+      const imageResponse = await axios.get(imageInput, {
+        responseType: 'arraybuffer',
+        timeout: 30000, // 30 second timeout for URL fetch
+      });
+      
+      imageBuffer = Buffer.from(imageResponse.data);
+      console.log('[DEBUG OCR] Image fetched, size:', imageBuffer.length, 'bytes');
+    }
+    
+    // Get or create worker
+    const worker = await getWorker();
+    console.log('[DEBUG OCR] Worker initialized');
+    
+    // Perform OCR recognition
+    console.log('[DEBUG OCR] Starting text recognition...');
+    const { data: { text } } = await queueRecognition(async () => {
+      return await worker.recognize(imageBuffer);
     });
-
+    
+    console.log('[DEBUG OCR] OCR text extracted, length:', text.length);
+    console.log('[DEBUG OCR] Extracted text preview:', text.substring(0, 200));
+    
     // Parse the extracted text
-    const tradeData = parseTradeText(text);
-
+    const parsedData = parseTradeText(text);
+    
+    console.log('[DEBUG OCR] Parsed trade data:', parsedData);
+    
     return {
       success: true,
-      data: tradeData,
-      rawText: text, // Include raw text for manual review
+      data: parsedData,
+      rawText: text,
     };
   } catch (error) {
-    console.error('OCR Error:', error);
+    console.error('[DEBUG OCR] OCR error:', error.message);
+    console.error('[DEBUG OCR] Error stack:', error.stack);
+    
     return {
       success: false,
-      error: error.message,
+      error: error.message || 'OCR processing failed',
     };
   }
 }
@@ -121,23 +184,6 @@ function parseTradeText(text) {
   return tradeData;
 }
 
-/**
- * Manual data entry helper - for when OCR fails
- * This can be used to manually input trade data
- */
-export function createManualTradeData(data) {
-  return {
-    symbol: data.symbol?.toUpperCase() || null,
-    type: data.type || null,
-    volumeLot: parseFloat(data.volumeLot) || null,
-    openPrice: parseFloat(data.openPrice) || null,
-    closePrice: parseFloat(data.closePrice) || null,
-    takeProfit: data.takeProfit ? parseFloat(data.takeProfit) : null,
-    stopLoss: data.stopLoss ? parseFloat(data.stopLoss) : null,
-    profitLoss: parseFloat(data.profitLoss) || null,
-    tradeDate: data.tradeDate ? new Date(data.tradeDate) : new Date(),
-    openTime: data.openTime ? new Date(data.openTime) : null,
-    closeTime: data.closeTime ? new Date(data.closeTime) : null,
-  };
-}
-
+module.exports = {
+  extractTradeDataFromImage,
+};
