@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Logo from '../components/Logo';
 import '../globals.css';
 
 export default function Dashboard() {
@@ -122,7 +123,10 @@ export default function Dashboard() {
     <div>
       <nav className="navbar">
         <div className="navbar-content">
-          <h1>📊 Crypto Trading Tracker</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Logo size={36} />
+            <h1>Crypto Trading Tracker</h1>
+          </div>
           <div className="navbar-links">
             <Link href="/dashboard">📈 Dashboard</Link>
             <Link href="/upload">📤 Upload Trade</Link>

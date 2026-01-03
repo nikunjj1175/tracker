@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import axios from 'axios';
+import Logo from '../components/Logo';
 import '../globals.css';
 
 export default function UploadPage() {
@@ -164,9 +165,7 @@ export default function UploadPage() {
         timeout: 120000, // 120 seconds timeout (OCR can take time)
       });
 
-      const data = response.data;
-      console.log(data);
-      
+      const data = response.data;      
 
       if (!data.success) {
         // Handle error response
@@ -365,7 +364,10 @@ export default function UploadPage() {
     <div>
       <nav className="navbar">
         <div className="navbar-content">
-          <h1>📊 Crypto Trading Tracker</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Logo size={36} />
+            <h1>Crypto Trading Tracker</h1>
+          </div>
           <div className="navbar-links">
             <Link href="/dashboard">📈 Dashboard</Link>
             <Link href="/upload">📤 Upload Trade</Link>
