@@ -5,6 +5,9 @@ const { extractTradeDataFromImage } = require('@/utils/ocrParser');
 import connectDB from '@/lib/mongodb';
 import Trade from '@/models/Trade';
 
+// Force dynamic rendering since we use request.headers for auth
+export const dynamic = 'force-dynamic';
+
 export async function POST(request) {
   try {
     // Check authentication
