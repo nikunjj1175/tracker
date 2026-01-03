@@ -5,6 +5,9 @@ const { extractTradeDataFromImage } = require('@/utils/ocrParser');
 import connectDB from '@/lib/mongodb';
 import Trade from '@/models/Trade';
 
+// Force dynamic rendering since we use request.headers for auth
+export const dynamic = 'force-dynamic';
+
 export async function POST(request) {
   try {
     // Check authentication
@@ -62,12 +65,6 @@ export async function POST(request) {
       );
     }
 
-    // Upload to Cloudinary (same pattern as mandal project)
-    console.log('[DEBUG] Starting Cloudinary upload...');
-    console.log('[DEBUG] File size:', file.size, 'bytes');
-    console.log('[DEBUG] File type:', file.type);
-    console.log('[DEBUG] File name:', file.name);
-    
     let url, publicId;
     try {
       const date = new Date(tradeDate);
@@ -80,9 +77,6 @@ export async function POST(request) {
       const baseName = file.name.split('.')[0] || 'trade';
       const filename = `${baseName}_${timestamp}`;
       
-      console.log('[DEBUG] Upload folder:', folderPath);
-      console.log('[DEBUG] Upload filename:', filename);
-      
       // Upload using mandal project pattern
       const uploadResult = await uploadToCloudinary(
         buffer,
@@ -90,22 +84,9 @@ export async function POST(request) {
         filename
       );
       
-      console.log('[DEBUG] Cloudinary upload successful!');
-      console.log('[DEBUG] Upload result:', {
-        url: uploadResult.url || uploadResult.secure_url,
-        publicId: uploadResult.publicId || uploadResult.public_id
-      });
-      
       url = uploadResult.url || uploadResult.secure_url;
       publicId = uploadResult.publicId || uploadResult.public_id;
     } catch (error) {
-      console.error('[DEBUG] Cloudinary upload error:', error);
-      console.error('[DEBUG] Error details:', {
-        message: error.message,
-        name: error.name,
-        http_code: error.http_code,
-        stack: error.stack
-      });
       
       return NextResponse.json(
         { 
@@ -118,15 +99,10 @@ export async function POST(request) {
 
     // If extractOnly flag is set, just return the image URL and extracted data
     if (extractOnly) {
-      console.log('[DEBUG] extractOnly=true, performing OCR extraction...');
-      console.log('[DEBUG] Image URL:', url);
-      console.log('[DEBUG] Using image buffer directly (no need to fetch from URL)');
-      
       // Perform OCR with timeout (30 seconds for OCR processing)
       let ocrResult = null;
       
       try {
-        console.log('[DEBUG] Calling extractTradeDataFromImage with buffer...');
         // Pass the buffer directly instead of URL to avoid fetch timeout
         // Set timeout to 30 seconds for OCR processing (OCR can take time)
         ocrResult = await Promise.race([
@@ -136,10 +112,8 @@ export async function POST(request) {
           )
         ]);
         
-        console.log('[DEBUG] OCR Result received:', ocrResult);
         
         if (ocrResult && ocrResult.success && ocrResult.data) {
-          console.log('[DEBUG] OCR Status: SUCCESS');
           return NextResponse.json({
             success: true,
             imageUrl: url,
@@ -149,12 +123,10 @@ export async function POST(request) {
           });
         }
       } catch (ocrError) {
-        console.error('[DEBUG] OCR error (continuing without OCR):', ocrError.message);
         // Continue without OCR - user can enter data manually
       }
       
       // Return success with image URL (OCR failed, but upload succeeded)
-      console.log('[DEBUG] Returning without OCR data - user can enter manually');
       return NextResponse.json({
         success: true,
         imageUrl: url,
@@ -177,7 +149,6 @@ export async function POST(request) {
       };
     } else {
       // If no manual data, require manual entry (OCR disabled due to worker issues)
-      console.log('[DEBUG] No manual data provided');
       return NextResponse.json({
         success: false,
         message: 'Please provide trade data. OCR is currently unavailable.',

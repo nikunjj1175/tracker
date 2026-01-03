@@ -4,6 +4,9 @@ import connectDB from '@/lib/mongodb';
 import Trade from '@/models/Trade';
 const { deleteFromCloudinary } = require('@/lib/cloudinary');
 
+// Force dynamic rendering since we use request.headers for auth
+export const dynamic = 'force-dynamic';
+
 // GET single trade
 export async function GET(request, { params }) {
   try {
